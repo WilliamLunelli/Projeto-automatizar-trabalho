@@ -1,0 +1,22 @@
+{
+  "name": "conversor-excel",
+  "version": "1.0.0",
+  "description": "Conversor de tabelas Excel entre formatos",
+  "main": "conversor-simples.js",
+  "bin": {
+    "conversor-excel": "./conversor-simples.js"
+  },
+  "scripts": {
+    "start": "node conversor-simples.js"
+  },
+  "keywords": [
+    "excel",
+    "converter",
+    "tabelas"
+  ],
+  "author": "Seu Nome",
+  "license": "ISC",
+  "dependencies": {
+    "xlsx": "^0.18.5"
+  }
+}
