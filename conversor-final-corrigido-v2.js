@@ -1,12 +1,10 @@
 #!/usr/bin/env node
-// conversor-final-corrigido.js - Solução específica para o problema de descrição
+// conversor-final-corrigido-v2.js - Versão aprimorada para resolver problemas de descrição vazia
 const XLSX = require('xlsx');
 const fs = require('fs');
 
 /**
  * Função para normalizar strings (remover acentos, converter para minúsculo)
- * @param {string} texto - Texto a ser normalizado
- * @returns {string} - Texto normalizado
  */
 function normalizar(texto) {
     if (!texto) return '';
@@ -18,24 +16,21 @@ function normalizar(texto) {
 }
 
 /**
- * Função para verificar se uma coluna existe com diferentes variações de nome
- * @param {Object} obj - Objeto onde procurar a coluna
- * @param {Array} possiveisNomes - Array de possíveis nomes da coluna
- * @returns {string|null} - Nome encontrado ou null
+ * Função para encontrar coluna com múltiplas variações de nome
  */
 function encontrarColuna(obj, possiveisNomes) {
     if (!obj || !possiveisNomes || !Array.isArray(possiveisNomes)) {
         return null;
     }
 
-    // Verificar correspondência exata primeiro
+    // Primeiro, procura correspondência exata
     for (const nome of possiveisNomes) {
         if (obj.hasOwnProperty(nome)) {
             return nome;
         }
     }
 
-    // Verificar por normalização
+    // Depois procura por normalização
     const normalizados = possiveisNomes.map(n => normalizar(n));
     const todasChaves = Object.keys(obj);
 
@@ -51,20 +46,14 @@ function encontrarColuna(obj, possiveisNomes) {
 }
 
 /**
- * Função para obter valor seguro de um objeto, buscando entre múltiplos nomes possíveis
- * @param {Object} obj - Objeto de onde obter o valor
- * @param {Array} possiveisNomes - Possíveis nomes da chave a buscar
- * @param {any} valorPadrao - Valor padrão caso não encontre
- * @returns {any} - Valor encontrado ou valor padrão
+ * Função para obter valor seguro de um objeto
  */
 function obterValorSeguro(obj, possiveisNomes, valorPadrao = '') {
     if (!obj || !possiveisNomes) {
         return valorPadrao;
     }
 
-    // Se possiveisNomes não for array, trate como string única
     const nomes = Array.isArray(possiveisNomes) ? possiveisNomes : [possiveisNomes];
-
     const nomeEncontrado = encontrarColuna(obj, nomes);
 
     if (nomeEncontrado) {
@@ -79,8 +68,6 @@ function obterValorSeguro(obj, possiveisNomes, valorPadrao = '') {
 
 /**
  * Função para verificar se o valor está vazio
- * @param {any} valor - Valor a verificar
- * @returns {boolean} - true se estiver vazio, false caso contrário
  */
 function estaVazio(valor) {
     if (valor === undefined || valor === null) return true;
@@ -89,33 +76,81 @@ function estaVazio(valor) {
 }
 
 /**
- * Função para converter números que podem estar em formatos diferentes
- * @param {any} valor - Valor a ser convertido
- * @param {number|null} valorPadrao - Valor padrão caso inválido
- * @returns {number|null} - Valor numérico ou null
+ * Nova função: tentar extrair descrição de diferentes maneiras mais agressivas
  */
-function parseNumero(valor, valorPadrao = null) {
-    if (valor === undefined || valor === null || valor === '') return valorPadrao;
-    try {
-        if (typeof valor === 'number') return isNaN(valor) ? valorPadrao : valor;
+function extrairDescricao(produtoAtual, mapaColunasEncontradas, index) {
+    // Método 1: Tentar colunas de descrição
+    const colunasDescricao = [
+        'Descrição', 'Descricao', 'Descr', 'Desc', 'Description',
+        'Nome', 'Nome do Produto', 'Produto', 'Denominação', 'Denominacao'
+    ];
 
-        // Lidar com formato brasileiro (vírgula como separador decimal)
-        const valorStr = String(valor).replace(/\./g, '').replace(',', '.');
-        const valorConvertido = Number(valorStr);
-
-        return isNaN(valorConvertido) ? valorPadrao : valorConvertido;
-    } catch (error) {
-        console.error(`Erro ao converter valor numérico: ${valor}`, error);
-        return valorPadrao;
+    for (const col of colunasDescricao) {
+        const descricao = obterValorSeguro(produtoAtual, [col]);
+        if (!estaVazio(descricao)) {
+            return descricao;
+        }
     }
+
+    // Método 2: Procurar em TODAS as colunas por valores que podem ser descrição
+    const todasColunas = Object.keys(produtoAtual);
+
+    for (const col of todasColunas) {
+        // Pula colunas que claramente não são descrição
+        if (normalizar(col).includes('codigo') ||
+            normalizar(col).includes('preco') ||
+            normalizar(col).includes('valor') ||
+            normalizar(col).includes('ncm') ||
+            normalizar(col).includes('unidade')) {
+            continue;
+        }
+
+        const valor = produtoAtual[col];
+
+        // Verifica se o valor parece uma descrição
+        if (!estaVazio(valor) && typeof valor === 'string') {
+            // Considera descrição valores com pelo menos 3 caracteres e que contém letras
+            if (valor.length >= 3 && /[a-zA-Z]/.test(valor)) {
+                console.log(`Descrição encontrada em coluna "${col}" para produto ${index + 1}: "${valor}"`);
+                return valor;
+            }
+        }
+    }
+
+    // Método 3: Tentar extrair do código
+    const codigo = obterValorSeguro(produtoAtual, ['Código', 'Codigo']);
+    if (!estaVazio(codigo) && typeof codigo === 'string' && codigo.includes(' ')) {
+        const partes = codigo.split(' ');
+        const descricaoInferida = partes.slice(1).join(' ');
+        console.log(`Descrição inferida do código para produto ${index + 1}: "${descricaoInferida}"`);
+        return descricaoInferida;
+    }
+
+    // Método 4: Tentar concatenar valores de múltiplas colunas
+    const possiveisCamposDescricao = [];
+
+    for (const col of todasColunas) {
+        const valor = produtoAtual[col];
+        if (!estaVazio(valor) && typeof valor === 'string' && valor.length > 1 && /[a-zA-Z]/.test(valor)) {
+            possiveisCamposDescricao.push({ coluna: col, valor: valor });
+        }
+    }
+
+    if (possiveisCamposDescricao.length > 0) {
+        // Pega o valor mais longo como descrição
+        const melhorDescricao = possiveisCamposDescricao.reduce((max, atual) =>
+            atual.valor.length > max.valor.length ? atual : max
+        );
+
+        console.log(`Descrição extraída da coluna "${melhorDescricao.coluna}" para produto ${index + 1}: "${melhorDescricao.valor}"`);
+        return melhorDescricao.valor;
+    }
+
+    return '';
 }
 
 /**
  * Função para converter um produto do formato atual para o novo formato
- * @param {Object} produtoAtual - Produto no formato atual
- * @param {Object} mapaColunasEncontradas - Mapa de todas as colunas encontradas
- * @param {number} index - Índice do produto para referência em logs
- * @returns {Object} - Produto no novo formato
  */
 function converterProduto(produtoAtual, mapaColunasEncontradas, index) {
     try {
@@ -129,24 +164,17 @@ function converterProduto(produtoAtual, mapaColunasEncontradas, index) {
         // Tratar código como string
         codigo = codigo ? String(codigo) : '';
 
-        // Tentar obter descrição de diferentes maneiras
-        let descricao = obterValorSeguro(produtoAtual, mapa.descricao || ['Descrição', 'Descricao', 'Descr']);
+        // NOVA ABORDAGEM: Usar função de extração de descrição mais agressiva
+        let descricao = extrairDescricao(produtoAtual, mapaColunasEncontradas, index);
 
-        // Se não houver descrição e o código parecer conter a descrição
-        if (estaVazio(descricao) && !estaVazio(codigo) && codigo.includes(' ')) {
-            const partes = codigo.split(' ');
-            const codigoPuro = partes[0];
-            descricao = partes.slice(1).join(' ');
-            console.log(`\nInferindo descrição para produto ${index + 1} (Catálogo: ${catalogo}):`);
-            console.log(`- Código original: "${codigo}"`);
-            console.log(`- Código puro: "${codigoPuro}"`);
-            console.log(`- Descrição inferida: "${descricao}"`);
-
-            // Atualizar o código para usar apenas a parte numérica
-            codigo = codigoPuro;
+        // Se ainda não encontrou descrição, tenta uma última estratégia
+        if (estaVazio(descricao)) {
+            // Cria uma descrição baseada no ID ou posição
+            descricao = `Produto ${index + 1}`;
+            console.warn(`⚠️ Usando descrição padrão para produto ${index + 1}: "${descricao}"`);
         }
 
-        // Extrair outros campos com tratamento seguro
+        // Resto da conversão permanece igual...
         const unidade = obterValorSeguro(produtoAtual, mapa.unidade || ['Unidade']);
         const ncm = obterValorSeguro(produtoAtual, mapa.ncm || ['NCM', 'Classificação Fiscal', 'Classificacao Fiscal']);
         const precoVarejo = obterValorSeguro(produtoAtual, mapa.precoVarejo || ['Preço Varejo', 'Preco Varejo']);
@@ -249,9 +277,26 @@ function converterProduto(produtoAtual, mapaColunasEncontradas, index) {
 }
 
 /**
- * Função para fazer diagnóstico inicial das colunas encontradas no arquivo
- * @param {Array} produtos - Array de produtos lidos do Excel
- * @returns {Object} - Mapa de colunas encontradas
+ * Função para converter números que podem estar em formatos diferentes
+ */
+function parseNumero(valor, valorPadrao = null) {
+    if (valor === undefined || valor === null || valor === '') return valorPadrao;
+    try {
+        if (typeof valor === 'number') return isNaN(valor) ? valorPadrao : valor;
+
+        // Lidar com formato brasileiro (vírgula como separador decimal)
+        const valorStr = String(valor).replace(/\./g, '').replace(',', '.');
+        const valorConvertido = Number(valorStr);
+
+        return isNaN(valorConvertido) ? valorPadrao : valorConvertido;
+    } catch (error) {
+        console.error(`Erro ao converter valor numérico: ${valor}`, error);
+        return valorPadrao;
+    }
+}
+
+/**
+ * Função expandida para diagnóstico de colunas
  */
 function diagnosticarColunas(produtos) {
     if (!produtos || produtos.length === 0) {
@@ -261,27 +306,95 @@ function diagnosticarColunas(produtos) {
 
     // Extrair todas as colunas
     const todasColunas = new Set();
-    produtos.forEach(produto => {
+    const contagemColunas = {};
+    const exemplosColunas = {};
+
+    produtos.forEach((produto, idx) => {
         if (produto && typeof produto === 'object') {
-            Object.keys(produto).forEach(chave => todasColunas.add(chave));
+            Object.entries(produto).forEach(([chave, valor]) => {
+                todasColunas.add(chave);
+
+                // Conta quantas vezes cada coluna aparece com valor não vazio
+                if (!estaVazio(valor)) {
+                    contagemColunas[chave] = (contagemColunas[chave] || 0) + 1;
+
+                    // Guarda exemplos de valores
+                    if (!exemplosColunas[chave]) {
+                        exemplosColunas[chave] = [];
+                    }
+                    if (exemplosColunas[chave].length < 3) {
+                        exemplosColunas[chave].push(valor);
+                    }
+                }
+            });
         }
     });
 
-    console.log(`\nEncontradas ${todasColunas.size} colunas no arquivo:`);
+    console.log(`\n=== DIAGNÓSTICO DE COLUNAS ===`);
+    console.log(`Total de produtos: ${produtos.length}`);
+    console.log(`Total de colunas encontradas: ${todasColunas.size}`);
+
+    console.log('\nDetalhes das colunas:');
     Array.from(todasColunas).forEach(coluna => {
-        console.log(`- ${coluna}`);
+        const contagem = contagemColunas[coluna] || 0;
+        const percentual = Math.round((contagem / produtos.length) * 100);
+        const exemplos = exemplosColunas[coluna] || [];
+
+        console.log(`- "${coluna}": ${contagem} valores (${percentual}%)`);
+        if (exemplos.length > 0) {
+            console.log(`  Exemplos: ${exemplos.map(e => `"${e}"`).join(', ')}`);
+        }
     });
 
-    // Se não há produtos ou o primeiro produto não é um objeto, retornar vazio
-    if (produtos.length === 0 || !produtos[0] || typeof produtos[0] !== 'object') {
-        return {};
-    }
+    // Identificar possíveis colunas de descrição
+    console.log('\n=== ANÁLISE DE POSSÍVEIS COLUNAS DE DESCRIÇÃO ===');
+    const possiveisColunas = [];
 
-    // Mapeamento de colunas importantes
+    Array.from(todasColunas).forEach(coluna => {
+        const normalizada = normalizar(coluna);
+        const contagem = contagemColunas[coluna] || 0;
+        const percentual = Math.round((contagem / produtos.length) * 100);
+        const exemplos = exemplosColunas[coluna] || [];
+
+        // Verifica se a coluna pode ser descrição por nome ou por conteúdo
+        const pareceColunaDescricao = normalizada.includes('descr') ||
+            normalizada.includes('desc') ||
+            normalizada.includes('nome') ||
+            normalizada.includes('produto') ||
+            normalizada.includes('denominacao');
+
+        const pareceConteudoDescricao = exemplos.some(exemplo =>
+            exemplo &&
+            typeof exemplo === 'string' &&
+            exemplo.length > 3 &&
+            /[a-zA-Z]/.test(exemplo)
+        );
+
+        if (pareceColunaDescricao || pareceConteudoDescricao) {
+            possiveisColunas.push({
+                coluna: coluna,
+                contagem: contagem,
+                percentual: percentual,
+                exemplos: exemplos,
+                scoring: pareceColunaDescricao ? 10 : 0 + (pareceConteudoDescricao ? 5 : 0) + (contagem / produtos.length) * 10
+            });
+        }
+    });
+
+    // Ordena por probabilidade de ser descrição
+    possiveisColunas.sort((a, b) => b.scoring - a.scoring);
+
+    console.log('\nPrincipais candidatas a coluna de descrição:');
+    possiveisColunas.slice(0, 5).forEach((info, idx) => {
+        console.log(`${idx + 1}. "${info.coluna}" - ${info.contagem} valores (${info.percentual}%)`);
+        console.log(`   Exemplos: ${info.exemplos.slice(0, 2).map(e => `"${e}"`).join(', ')}`);
+    });
+
+    // Resto do diagnóstico permanece igual...
     const mapeamento = {
         catalogo: encontrarColuna(produtos[0], ['Catálogo', 'Catalogo']),
         codigo: encontrarColuna(produtos[0], ['Código', 'Codigo']),
-        descricao: encontrarColuna(produtos[0], ['Descrição', 'Descricao']),
+        descricao: possiveisColunas[0] ? possiveisColunas[0].coluna : encontrarColuna(produtos[0], ['Descrição', 'Descricao']),
         unidade: encontrarColuna(produtos[0], ['Unidade']),
         ncm: encontrarColuna(produtos[0], ['NCM', 'Classificação Fiscal', 'Classificacao Fiscal']),
         precoVarejo: encontrarColuna(produtos[0], ['Preço Varejo', 'Preco Varejo']),
@@ -298,51 +411,10 @@ function diagnosticarColunas(produtos) {
         grupo: encontrarColuna(produtos[0], ['Grupo'])
     };
 
-    console.log("\nMapeamento de colunas encontradas:");
+    console.log("\n=== MAPEAMENTO FINAL ===");
     Object.entries(mapeamento).forEach(([chave, valor]) => {
         console.log(`- ${chave}: ${valor || 'NÃO ENCONTRADO'}`);
     });
-
-    // Verificar se o código contém a descrição
-    if (mapeamento.codigo) {
-        const colunaCodigo = mapeamento.codigo;
-        const colunaDescricao = mapeamento.descricao;
-
-        // Verificar se há descrições vazias ou se a coluna de descrição não existe
-        const temProblemaDescricao = !colunaDescricao ||
-            produtos.some(p => !p[colunaDescricao] && p && p[colunaCodigo]);
-
-        if (temProblemaDescricao) {
-            console.log("\nAnalisando campo Código para verificar se contém descrição...");
-
-            // Pegar uma amostra de produtos não vazios
-            const produtosValidos = produtos.filter(p => p && p[colunaCodigo]);
-            const amostra = produtosValidos.slice(0, Math.min(5, produtosValidos.length));
-
-            const codigosComEspaco = amostra.filter(p => {
-                const codigo = p[colunaCodigo];
-                return codigo &&
-                    typeof codigo === 'string' &&
-                    codigo.includes(' ');
-            });
-
-            if (codigosComEspaco.length > 0) {
-                console.log(`\n✅ Encontrados ${codigosComEspaco.length} produtos (na amostra) com código contendo espaços.`);
-                console.log("Exemplo de código contendo descrição:");
-
-                const exemplo = codigosComEspaco[0];
-                const codigo = exemplo[colunaCodigo];
-                const partes = codigo.split(' ');
-
-                console.log(`- Código original: "${codigo}"`);
-                console.log(`- Possível código puro: "${partes[0]}"`);
-                console.log(`- Possível descrição: "${partes.slice(1).join(' ')}"`);
-
-                console.log("\n⚠️ Assumindo que o campo Código contém tanto o código quanto a descrição!");
-                console.log("O conversor fará a separação automática.");
-            }
-        }
-    }
 
     return mapeamento;
 }
@@ -353,10 +425,10 @@ function diagnosticarColunas(produtos) {
 function iniciar() {
     try {
         console.log('===================================');
-        console.log('  CONVERSOR DE TABELAS EXCEL');
-        console.log('  Versão Final com Correções Específicas');
+        console.log('  CONVERSOR DE TABELAS EXCEL V2');
+        console.log('  Resolução de problemas de descrição');
         console.log('===================================');
-        console.log('\nEste script converte sua tabela do formato atual para o novo formato.\n');
+        console.log('\nEste script converte sua tabela com tratamento especial para descrições.\n');
 
         // Obter os argumentos da linha de comando ou usar valores padrão
         const args = process.argv.slice(2);
@@ -367,7 +439,7 @@ function iniciar() {
         // Verificar se o arquivo de entrada existe
         if (!fs.existsSync(arquivoEntrada)) {
             console.error(`\nErro: O arquivo ${arquivoEntrada} não foi encontrado.`);
-            console.log('\nUso: node conversor-final-corrigido.js [arquivo_entrada.xlsx] [arquivo_saida.xlsx] [--debug]');
+            console.log('\nUso: node conversor-final-corrigido-v2.js [arquivo_entrada.xlsx] [arquivo_saida.xlsx] [--debug]');
             return;
         }
 
@@ -376,27 +448,14 @@ function iniciar() {
         console.log(`Modo debug: ${modoDebug ? 'Ativado' : 'Desativado'}`);
         console.log('\nIniciando conversão...');
 
-        // Lendo o arquivo Excel de entrada com tratamento de erros
-        let workbookEntrada;
-        try {
-            workbookEntrada = XLSX.readFile(arquivoEntrada, {
-                cellStyles: true,
-                cellDates: true,
-                cellNF: true,
-                raw: false, // Para ter um processamento mais confiável de texto e números
-                type: 'binary'
-            });
-        } catch (error) {
-            console.error(`\nErro ao ler o arquivo Excel: ${error.message}`);
-            console.log('Tentando ler novamente com configurações alternativas...');
-
-            workbookEntrada = XLSX.readFile(arquivoEntrada, {
-                cellStyles: false,
-                cellDates: false,
-                cellNF: false,
-                raw: true
-            });
-        }
+        // Lendo o arquivo Excel de entrada
+        const workbookEntrada = XLSX.readFile(arquivoEntrada, {
+            cellStyles: true,
+            cellDates: true,
+            cellNF: true,
+            raw: false,
+            type: 'binary'
+        });
 
         if (!workbookEntrada || !workbookEntrada.SheetNames || workbookEntrada.SheetNames.length === 0) {
             throw new Error('Não foi possível ler o arquivo Excel corretamente.');
@@ -409,43 +468,16 @@ function iniciar() {
             throw new Error(`Planilha '${sheetNameEntrada}' não encontrada no arquivo.`);
         }
 
-        // Convertendo para JSON com tratamento de erros
-        let produtosAtuaisRaw;
-        try {
-            produtosAtuaisRaw = XLSX.utils.sheet_to_json(worksheetEntrada, {
-                raw: false,      // Obter valores formatados
-                defval: '',      // Valor padrão para células vazias
-                blankrows: false // Ignorar linhas em branco
-            });
-        } catch (error) {
-            console.error(`\nErro ao converter planilha para JSON: ${error.message}`);
-            console.log('Tentando método alternativo...');
-
-            // Método alternativo: ler como array e converter manualmente
-            const dadosRaw = XLSX.utils.sheet_to_json(worksheetEntrada, {
-                header: 1,
-                raw: true
-            });
-
-            if (!dadosRaw || dadosRaw.length <= 1) {
-                throw new Error('A planilha não contém dados suficientes.');
-            }
-
-            const cabecalhos = dadosRaw[0];
-            produtosAtuaisRaw = dadosRaw.slice(1).map(linha => {
-                const produto = {};
-                linha.forEach((valor, index) => {
-                    if (index < cabecalhos.length && cabecalhos[index]) {
-                        produto[cabecalhos[index]] = valor;
-                    }
-                });
-                return produto;
-            });
-        }
+        // Convertendo para JSON
+        const produtosAtuaisRaw = XLSX.utils.sheet_to_json(worksheetEntrada, {
+            raw: false,
+            defval: '',
+            blankrows: false
+        });
 
         console.log(`\nLidos ${produtosAtuaisRaw.length} produtos do arquivo de entrada`);
 
-        // Fazer diagnóstico das colunas encontradas
+        // Fazer diagnóstico expandido das colunas encontradas
         const mapaColunasEncontradas = diagnosticarColunas(produtosAtuaisRaw);
 
         // Processando os produtos
@@ -466,16 +498,6 @@ function iniciar() {
                 // Converter o produto
                 const produtoNovo = converterProduto(produtoRaw, mapaColunasEncontradas, index);
 
-                // Verificar se a descrição foi inferida do código
-                const colunaCodigo = mapaColunasEncontradas.codigo;
-                const colunaDescricao = mapaColunasEncontradas.descricao;
-
-                if (colunaCodigo &&
-                    (!colunaDescricao || estaVazio(produtoRaw[colunaDescricao])) &&
-                    !estaVazio(produtoNovo.Descrição)) {
-                    descricoesInferidas++;
-                }
-
                 // Verificar se ainda tem problema de descrição após conversão
                 if (estaVazio(produtoNovo.Descrição)) {
                     avisosDescricaoVazia.push({
@@ -493,22 +515,32 @@ function iniciar() {
                 falhas++;
             }
 
-            // Mostrar progresso a cada 100 produtos
+            // Mostrar progresso
             if ((index + 1) % 100 === 0 || index + 1 === produtosAtuaisRaw.length) {
                 process.stdout.write(`\rProcessando: ${index + 1}/${produtosAtuaisRaw.length} produtos`);
             }
         }
 
-        console.log('\n\nResultados da conversão:');
+        console.log('\n\n=== RESULTADOS DA CONVERSÃO ===');
         console.log(`✅ ${sucessos} produtos processados com sucesso`);
         console.log(`❌ ${falhas} produtos com falhas durante o processamento`);
-        console.log(`🔍 ${descricoesInferidas} descrições foram inferidas a partir do campo Código`);
 
         // Mostrar avisos de descrição vazia
         if (avisosDescricaoVazia.length > 0) {
-            console.warn(`\n⚠️ Atenção: ${avisosDescricaoVazia.length} produtos ainda estão com o campo Descrição vazio!`);
-            console.warn('Produtos afetados (primeiros 10): ' + avisosDescricaoVazia.slice(0, 10).map(item => item.codigo).join(', ') +
-                (avisosDescricaoVazia.length > 10 ? ` e mais ${avisosDescricaoVazia.length - 10}...` : ''));
+            console.warn(`\n⚠️ Atenção: ${avisosDescricaoVazia.length} produtos ficaram com o campo Descrição vazio!`);
+
+            if (avisosDescricaoVazia.length <= 20) {
+                console.warn('Produtos afetados:');
+                avisosDescricaoVazia.forEach(item => {
+                    console.warn(`- ${item.codigo}`);
+                });
+            } else {
+                console.warn('Produtos afetados (primeiros 20):');
+                avisosDescricaoVazia.slice(0, 20).forEach(item => {
+                    console.warn(`- ${item.codigo}`);
+                });
+                console.warn(`... e mais ${avisosDescricaoVazia.length - 20} produtos`);
+            }
         } else {
             console.log('\n✅ Todos os produtos têm descrição válida!');
         }
@@ -532,29 +564,13 @@ function iniciar() {
         }
 
         // Criando uma nova planilha com os dados convertidos
-        try {
-            const worksheetSaida = XLSX.utils.json_to_sheet(produtosNovos);
-            const workbookSaida = XLSX.utils.book_new();
-            XLSX.utils.book_append_sheet(workbookSaida, worksheetSaida, 'Produtos');
+        const worksheetSaida = XLSX.utils.json_to_sheet(produtosNovos);
+        const workbookSaida = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(workbookSaida, worksheetSaida, 'Produtos');
 
-            // Salvando o arquivo de saída
-            XLSX.writeFile(workbookSaida, arquivoSaida);
-            console.log(`\n✨ Conversão concluída com sucesso! Arquivo salvo em: ${arquivoSaida}`);
-        } catch (error) {
-            console.error(`\nErro ao salvar o arquivo de saída: ${error.message}`);
-
-            // Tentar salvar em outro formato
-            try {
-                console.log('Tentando salvar em formato alternativo (CSV)...');
-                const csvSaida = arquivoSaida.replace(/\.xlsx?$/i, '.csv');
-                const csvContent = XLSX.utils.sheet_to_csv(XLSX.utils.json_to_sheet(produtosNovos));
-                fs.writeFileSync(csvSaida, csvContent, 'utf8');
-                console.log(`Arquivo CSV salvo com sucesso em: ${csvSaida}`);
-            } catch (csvError) {
-                console.error(`Também não foi possível salvar como CSV: ${csvError.message}`);
-                throw error; // Relancar erro original
-            }
-        }
+        // Salvando o arquivo de saída
+        XLSX.writeFile(workbookSaida, arquivoSaida);
+        console.log(`\n✨ Conversão concluída com sucesso! Arquivo salvo em: ${arquivoSaida}`);
 
         console.log('\n👋 Obrigado por usar o Conversor de Tabelas Excel!');
 
